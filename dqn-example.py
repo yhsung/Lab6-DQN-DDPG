@@ -1,59 +1,90 @@
-'''DLP DQN Lab'''
-__author__ = 'chengscott'
-__copyright__ = 'Copyright 2020, NCTU CGI Lab'
+import numpy as np
 import argparse
-from collections import deque
+from collections import deque, namedtuple
 import itertools
 import random
 import time
-
 import gym
-import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.tensorboard import SummaryWriter
+import torch.nn.functional as F
+import torch.optim as optim
+#from torch.utils.tensorboard import SummaryWriter
+from tensorboardX import SummaryWriter
 
+'''DLP DQN Lab'''
+__author__ = 'chengscott'
+__copyright__ = 'Copyright 2020, NCTU CGI Lab'
 
 class ReplayMemory:
-    __slots__ = ['buffer']
+    #__slots__ = ['buffer']
 
     def __init__(self, capacity):
         self.buffer = deque(maxlen=capacity)
+        self.experience = namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done"])
 
     def __len__(self):
         return len(self.buffer)
+    def append(self, state, action, reward, next_state, done):
+        """Add a new experience to memory."""
+        e = self.experience(state, action, reward, next_state, done)
+        self.buffer.append(e)
+    
+    def sample(self, batch_size, device):
+        """Randomly sample a batch of experiences from memory."""
+        experiences = random.sample(self.buffer, k=batch_size)
 
-    def append(self, *transition):
+        states = torch.from_numpy(np.vstack([e.state for e in experiences if e is not None])).float().to(device)
+        actions = torch.from_numpy(np.vstack([e.action for e in experiences if e is not None])).long().to(device)
+        rewards = torch.from_numpy(np.vstack([e.reward for e in experiences if e is not None])).float().to(device)
+        next_states = torch.from_numpy(np.vstack([e.next_state for e in experiences if e is not None])).float().to(device)
+        dones = torch.from_numpy(np.vstack([e.done for e in experiences if e is not None]).astype(np.uint8)).float().to(device)
+  
+        return (states, actions, rewards, next_states, dones)
+
+
+    def append1(self, *transition):
         # (state, action, reward, next_state, done)
         self.buffer.append(tuple(map(tuple, transition)))
+        print('Append buffer size', len(self.buffer))
 
-    def sample(self, batch_size, device):
+    def sample1(self, batch_size, device):
         '''sample a batch of transition tensors'''
+        print('Sample buffer size', len(self.buffer))
         transitions = random.sample(self.buffer, batch_size)
         return (torch.tensor(x, dtype=torch.float, device=device)
                 for x in zip(*transitions))
 
-
 class Net(nn.Module):
-    def __init__(self, state_dim=8, action_dim=4, hidden_dim=32):
-        super().__init__()
-        ## TODO ##
-        raise NotImplementedError
-
-    def forward(self, x):
-        ## TODO ##
-        raise NotImplementedError
-
+    def __init__(self, state_dim=8, action_dim=4, hidden_dim=32, seed=9487):
+        """Model Blueprint 
+        Params
+        ======
+            state_size (int): Dimension of each state
+            action_size (int): Dimension of each action
+            seed (int): Random seed
+        """
+        super(Net, self).__init__()   # the line you give simply calls the __init__ method of ClassNames parent class.
+        self.fc1 = nn.Linear(state_dim, 256)
+        self.fc2 = nn.Linear(256,128)
+        self.fc3 = nn.Linear(128,64)
+        self.out = nn.Linear(64, action_dim)
+    def forward(self, state):
+        x = F.relu(self.fc1(state))
+        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
+        q_vals = self.out(x)
+        return q_vals  #no need to return best action here as it selected in the act method based on eps value.
 
 class DQN:
+    """Define DQN Agent"""
     def __init__(self, args):
+        self.seed = torch.manual_seed(args.seed)
         self._behavior_net = Net().to(args.device)
         self._target_net = Net().to(args.device)
         # initialize target network
         self._target_net.load_state_dict(self._behavior_net.state_dict())
-        ## TODO ##
-        # self._optimizer = ?
-        raise NotImplementedError
+        self._optimizer = optim.Adam(self._behavior_net.parameters(), lr=args.lr)
         # memory
         self._memory = ReplayMemory(capacity=args.capacity)
 
@@ -65,9 +96,25 @@ class DQN:
         self.target_freq = args.target_freq
 
     def select_action(self, state, epsilon, action_space):
-        '''epsilon-greedy based on behavior network'''
-         ## TODO ##
-        raise NotImplementedError
+        '''epsilon-greedy based on behavior network
+        Params
+        ======
+            state (array_like): current state
+            episilon (float): epsilon, for epsilon-greedy action selection
+            action_space (array): available actions
+        '''
+        state = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
+        self._behavior_net.eval()
+        with torch.no_grad():
+            action_values = self._behavior_net(state)
+        self._behavior_net.train()
+
+        # Epsilon-greedy action selection
+        if random.random() > epsilon:
+            #return np.argmax(action_values.cpu().data.numpy())
+            return torch.argmax(action_values).cpu().data.numpy()
+        else:
+            return action_space.sample()
 
     def append(self, state, action, reward, next_state, done):
         self._memory.append(state, [action], [reward / 10], next_state,
@@ -80,28 +127,43 @@ class DQN:
             self._update_target_network()
 
     def _update_behavior_network(self, gamma):
-        # sample a minibatch of transitions
-        state, action, reward, next_state, done = self._memory.sample(
-            self.batch_size, self.device)
+        """Update value parameters using given batch of experience tuples.
 
-        ## TODO ##
-        # q_value = ?
-        # with torch.no_grad():
-        #    q_next = ?
-        #    q_target = ?
-        # criterion = ?
-        # loss = criterion(q_value, q_target)
-        raise NotImplementedError
-        # optimize
+        Params
+        ======
+            experiences (Tuple[torch.Tensor]): tuple of (s, a, r, s', done) tuples 
+            gamma (float): discount factor
+        """
+        # sample a minibatch of transitions
+        state, action, reward, next_state, done = self._memory.sample(self.batch_size, self.device)
+        # compute Q_target from the target network inputing next_state
+        with torch.no_grad():
+            Q_target_av = self._target_net(next_state).detach().max(1)[0].unsqueeze(1)
+            Q_target = reward + gamma*(Q_target_av)*(1-done) # broadcasting works here.
+        Q_value = self._behavior_net(state).gather(1, action)
+        loss = F.mse_loss(Q_value, Q_target)
         self._optimizer.zero_grad()
         loss.backward()
         nn.utils.clip_grad_norm_(self._behavior_net.parameters(), 5)
         self._optimizer.step()
 
+    def soft_update(self, local_model, target_model, tau):
+        """Soft update model parameters.
+        θ_target = τ*θ_local + (1 - τ)*θ_target
+
+        Params
+        ======
+            local_model (PyTorch model): weights will be copied from
+            target_model (PyTorch model): weights will be copied to
+            tau (float): interpolation parameter 
+        """
+        for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
+            target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
+
+
     def _update_target_network(self):
         '''update target network by copying from behavior network'''
-        ## TODO ##
-        raise NotImplementedError
+        self.soft_update(self._behavior_net, self._target_net, 1e-3)
 
     def save(self, model_path, checkpoint=False):
         if checkpoint:
@@ -151,6 +213,8 @@ def train(args, env_name, agent, writer):
             total_steps += 1
             if done:
                 ewma_reward = 0.05 * total_reward + (1 - 0.05) * ewma_reward
+                writer.add_hparams(args.__dict__,
+                        {'Total Steps': total_steps, 'Total Reward': total_reward, 'Total Ewma Reward': ewma_reward})
                 writer.add_scalar('Train/Episode Reward', total_reward,
                                   total_steps)
                 writer.add_scalar('Train/Ewma Reward', ewma_reward,
@@ -174,12 +238,14 @@ def test(args, env_name, agent, writer):
         total_reward = 0
         env.seed(seed)
         state = env.reset()
-        ## TODO ##
-        # ...
-        #     if done:
-        #         writer.add_scalar('Test/Episode Reward', total_reward, n_episode)
-        #         ...
-        raise NotImplementedError
+        for j in range(env._max_episode_steps):
+            action = agent.select_action(state, epsilon, action_space)
+            env.render()
+            state, reward, done, info = env.step(action)
+            total_reward += reward
+            if done:
+                writer.add_scalar('Test/Episode Reward', total_reward, n_episode)
+                break
     print('Average Reward', np.mean(rewards))
     env.close()
 

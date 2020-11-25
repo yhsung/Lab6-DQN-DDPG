@@ -1,3 +1,6 @@
+'''DLP DQN Lab'''
+__author__ = 'chengscott'
+__copyright__ = 'Copyright 2020, NCTU CGI Lab'
 import numpy as np
 import argparse
 from collections import deque, namedtuple
@@ -12,9 +15,6 @@ import torch.optim as optim
 #from torch.utils.tensorboard import SummaryWriter
 from tensorboardX import SummaryWriter
 
-'''DLP DQN Lab'''
-__author__ = 'chengscott'
-__copyright__ = 'Copyright 2020, NCTU CGI Lab'
 
 class ReplayMemory:
     #__slots__ = ['buffer']
@@ -29,7 +29,7 @@ class ReplayMemory:
         """Add a new experience to memory."""
         e = self.experience(state, action, reward, next_state, done)
         self.buffer.append(e)
-    
+
     def sample(self, batch_size, device):
         """Randomly sample a batch of experiences from memory."""
         experiences = random.sample(self.buffer, k=batch_size)
@@ -39,7 +39,7 @@ class ReplayMemory:
         rewards = torch.from_numpy(np.vstack([e.reward for e in experiences if e is not None])).float().to(device)
         next_states = torch.from_numpy(np.vstack([e.next_state for e in experiences if e is not None])).float().to(device)
         dones = torch.from_numpy(np.vstack([e.done for e in experiences if e is not None]).astype(np.uint8)).float().to(device)
-  
+
         return (states, actions, rewards, next_states, dones)
 
 
@@ -57,7 +57,7 @@ class ReplayMemory:
 
 class Net(nn.Module):
     def __init__(self, state_dim=8, action_dim=4, hidden_dim=32, seed=9487):
-        """Model Blueprint 
+        """Model Blueprint
         Params
         ======
             state_size (int): Dimension of each state
@@ -131,7 +131,7 @@ class DQN:
 
         Params
         ======
-            experiences (Tuple[torch.Tensor]): tuple of (s, a, r, s', done) tuples 
+            experiences (Tuple[torch.Tensor]): tuple of (s, a, r, s', done) tuples
             gamma (float): discount factor
         """
         # sample a minibatch of transitions
@@ -155,7 +155,7 @@ class DQN:
         ======
             local_model (PyTorch model): weights will be copied from
             target_model (PyTorch model): weights will be copied to
-            tau (float): interpolation parameter 
+            tau (float): interpolation parameter
         """
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
             target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
@@ -200,7 +200,6 @@ def train(args, env_name, agent, writer):
                 action = action_space.sample()
             else:
                 action = agent.select_action(state, epsilon, action_space)
-                epsilon = max(epsilon * args.eps_decay, args.eps_min)
             # execute action
             next_state, reward, done, _ = env.step(action)
             # store transition
@@ -213,8 +212,7 @@ def train(args, env_name, agent, writer):
             total_steps += 1
             if done:
                 ewma_reward = 0.05 * total_reward + (1 - 0.05) * ewma_reward
-                writer.add_hparams(args.__dict__,
-                        {'Total Steps': total_steps, 'Total Reward': total_reward, 'Total Ewma Reward': ewma_reward})
+                writer.add_scalar('Train/Epsilon', epsilon, total_steps)
                 writer.add_scalar('Train/Episode Reward', total_reward,
                                   total_steps)
                 writer.add_scalar('Train/Ewma Reward', ewma_reward,
@@ -224,7 +222,10 @@ def train(args, env_name, agent, writer):
                     .format(total_steps, episode, t, total_reward, ewma_reward,
                             epsilon))
                 break
+        if total_steps >= args.warmup:
+            epsilon = max(epsilon * args.eps_decay, args.eps_min)
     env.close()
+    return ewma_reward
 
 
 def test(args, env_name, agent, writer):
@@ -240,22 +241,23 @@ def test(args, env_name, agent, writer):
         state = env.reset()
         for j in range(env._max_episode_steps):
             action = agent.select_action(state, epsilon, action_space)
-            env.render()
+            if args.render:
+                env.render()
             state, reward, done, info = env.step(action)
             total_reward += reward
             if done:
                 writer.add_scalar('Test/Episode Reward', total_reward, n_episode)
                 break
+        rewards.append(total_reward)
     print('Average Reward', np.mean(rewards))
+    writer.add_hparams(args.__dict__,
+                       {'Test/Average Reward': np.mean(rewards)})
     env.close()
 
 
 def main():
     ## arguments ##
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('-d', '--device', default='cuda')
-    parser.add_argument('-m', '--model', default='dqn.pth')
-    parser.add_argument('--logdir', default='log/dqn')
     # train
     parser.add_argument('--warmup', default=10000, type=int)
     parser.add_argument('--episode', default=1200, type=int)
@@ -269,9 +271,13 @@ def main():
     parser.add_argument('--target_freq', default=1000, type=int)
     # test
     parser.add_argument('--test_only', action='store_true')
-    parser.add_argument('--render', action='store_true')
-    parser.add_argument('--seed', default=2021111, type=int)
+    parser.add_argument('--render', default=False, action='store_true')
     parser.add_argument('--test_epsilon', default=.001, type=float)
+    # utilities
+    parser.add_argument('-d', '--device', default='cuda')
+    parser.add_argument('-m', '--model', default='dqn.pth')
+    parser.add_argument('--logdir', default='log/dqn')
+    parser.add_argument('--seed', default=2021111, type=int)
     args = parser.parse_args()
 
     ## main ##
@@ -279,7 +285,9 @@ def main():
     agent = DQN(args)
     writer = SummaryWriter(args.logdir)
     if not args.test_only:
-        train(args, env_name, agent, writer)
+        ewma_reward = train(args, env_name, agent, writer)
+        writer.add_hparams(args.__dict__,
+                {'Train/Final Ewma Reward': ewma_reward})
         agent.save(args.model)
     agent.load(args.model)
     test(args, env_name, agent, writer)

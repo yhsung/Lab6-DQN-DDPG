@@ -264,27 +264,45 @@ def test(args, env_name, agent, writer):
 def main():
     _current_datetime = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     ## arguments ##
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     # train
-    parser.add_argument('--warmup', default=10000, type=int)
-    parser.add_argument('--episode', default=1200, type=int)
-    parser.add_argument('--capacity', default=10000, type=int)
-    parser.add_argument('--batch_size', default=128, type=int)
-    parser.add_argument('--lr', default=.0005, type=float)
-    parser.add_argument('--eps_decay', default=.995, type=float)
-    parser.add_argument('--eps_min', default=.01, type=float)
-    parser.add_argument('--gamma', default=.99, type=float)
-    parser.add_argument('--freq', default=4, type=int)
-    parser.add_argument('--target_freq', default=1000, type=int)
+    parser.add_argument('--warmup', default=10000, type=int,
+                        help='number of warmup steps')
+    parser.add_argument('--episode', default=1200, type=int,
+                        help='upper limit of training episodes')
+    parser.add_argument('--capacity', default=10000, type=int,
+                        help='capacity of replay buffer')
+    parser.add_argument('--batch_size', default=128, type=int,
+                        help='mini batch size extract from replay buffer')
+    parser.add_argument('--lr', default=.0005, type=float,
+                        help='learning rate')
+    parser.add_argument('--eps_decay', default=.995, type=float,
+                        help='epsilon decay rate')
+    parser.add_argument('--eps_min', default=.01, type=float,
+                        help='lower bound of epsilon')
+    parser.add_argument('--gamma', default=.99, type=float,
+                        help='gamma for update Q value')
+    parser.add_argument('--freq', default=4, type=int,
+                        help='interval to update behavior network')
+    parser.add_argument('--target_freq', default=1000, type=int,
+                        help='interval to update target network')
     # test
-    parser.add_argument('--test_only', action='store_true')
-    parser.add_argument('--render', default=False, action='store_true')
-    parser.add_argument('--test_epsilon', default=.001, type=float)
+    parser.add_argument('--test_only', action='store_true',
+                        help='conduct test only runs')
+    parser.add_argument('--render', default=False, action='store_true',
+                        help='render display')
+    parser.add_argument('--test_epsilon', default=.001, type=float,
+                        help='test epsilon')
     # utilities
-    parser.add_argument('-d', '--device', default='cuda')
-    parser.add_argument('-m', '--model', default='models/dqn-{}.pth'.format(_current_datetime))
-    parser.add_argument('--logdir', default='log/dqn/{}'.format(_current_datetime))
-    parser.add_argument('--seed', default=2021111, type=int)
+    parser.add_argument('-d', '--device', default='cuda',
+                        help='device used for training / testing')
+    parser.add_argument('-m', '--model', default='models/dqn-{}.pth'.format(_current_datetime),
+                        help='path to pretrained model / model save path')
+    parser.add_argument('--logdir', default='log/dqn/{}'.format(_current_datetime),
+                        help='path to tensorboard log')
+    parser.add_argument('--seed', default=2021111, type=int,
+                        help='random seed')
     args = parser.parse_args()
 
     ## main ##

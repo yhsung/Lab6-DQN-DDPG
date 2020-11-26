@@ -1,10 +1,12 @@
+#!/usr/bin/env/python3
+# -*- coding: utf-8 -*-
 '''DLP DQN Lab'''
 __author__ = 'chengscott'
 __copyright__ = 'Copyright 2020, NCTU CGI Lab'
 from collections import deque, namedtuple
 from datetime import datetime
-#from torch.utils.tensorboard import SummaryWriter
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
+#from tensorboardX import SummaryWriter
 import numpy as np
 import argparse
 import itertools
@@ -57,7 +59,7 @@ class ReplayMemory:
                 for x in zip(*transitions))
 
 class Net(nn.Module):
-    def __init__(self, state_dim=8, action_dim=4, hidden_dim=32):
+    def __init__(self, state_dim=8, action_dim=4):
         """Model Blueprint
         Params
         ======
@@ -66,12 +68,14 @@ class Net(nn.Module):
             seed (int): Random seed
         """
         super(Net, self).__init__()
-        self.fc1 = nn.Linear(state_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim,hidden_dim)
-        self.out = nn.Linear(hidden_dim, action_dim)
+        self.fc1 = nn.Linear(state_dim, 256)
+        self.fc2 = nn.Linear(256, 128)
+        self.fc3 = nn.Linear(128, 64)
+        self.out = nn.Linear(64, action_dim)
     def forward(self, state):
         x = F.relu(self.fc1(state))
         x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
         q_vals = self.out(x)
         return q_vals
 
@@ -122,7 +126,7 @@ class DQN:
     def update(self, total_steps):
         if total_steps % self.freq == 0:
             self._update_behavior_network(self.gamma)
-        if total_steps % self.target_freq == 0:
+        #if total_steps % self.target_freq == 0:
             self._update_target_network()
 
     def _update_behavior_network(self, gamma):
@@ -190,6 +194,7 @@ def train(args, env_name, agent, writer):
     env = gym.make(env_name)
     action_space = env.action_space
     total_steps, epsilon, ewma_reward = 0, 1., 0.
+    writer.add_graph(agent._behavior_net, torch.FloatTensor([0., 0., 0., 0., 0., 0., 0., 0.]).to(args.device), True)
     for episode in range(args.episode):
         total_reward = 0
         state = env.reset()
@@ -250,12 +255,12 @@ def test(args, env_name, agent, writer):
                 break
         rewards.append(total_reward)
     print('Average Reward', np.mean(rewards))
-    writer.add_hparams(args.__dict__,
-                       {'Test/Average Reward': np.mean(rewards)})
+    #writer.add_hparams(args.__dict__,{'Test/Average Reward': np.mean(rewards)})
     env.close()
 
 
 def main():
+    _current_datetime = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     ## arguments ##
     parser = argparse.ArgumentParser(description=__doc__)
     # train
@@ -275,8 +280,8 @@ def main():
     parser.add_argument('--test_epsilon', default=.001, type=float)
     # utilities
     parser.add_argument('-d', '--device', default='cuda')
-    parser.add_argument('-m', '--model', default='dqn.pth')
-    parser.add_argument('--logdir', default='log/dqn/{}'.format(datetime.now().isoformat()))
+    parser.add_argument('-m', '--model', default='models/dqn-{}.pth'.format(_current_datetime))
+    parser.add_argument('--logdir', default='log/dqn/{}'.format(_current_datetime))
     parser.add_argument('--seed', default=2021111, type=int)
     args = parser.parse_args()
 
@@ -286,8 +291,7 @@ def main():
     writer = SummaryWriter(args.logdir)
     if not args.test_only:
         ewma_reward = train(args, env_name, agent, writer)
-        writer.add_hparams(args.__dict__,
-                {'Train/Final Ewma Reward': ewma_reward})
+        writer.add_hparams(args.__dict__,{'Train/Final Ewma Reward': ewma_reward})
         agent.save(args.model)
     agent.load(args.model)
     test(args, env_name, agent, writer)

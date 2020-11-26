@@ -294,6 +294,7 @@ def main():
     if not args.test_only:
         ewma_reward = train(args, env_name, agent, writer)
         #writer.add_hparams(args.__dict__,{'Train/Final Ewma Reward': ewma_reward})
+        agent.save(args.model)
     agent.load(args.model)
     test(args, env_name, agent, writer)
 

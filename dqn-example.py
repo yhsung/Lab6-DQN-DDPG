@@ -1,9 +1,12 @@
 '''DLP DQN Lab'''
 __author__ = 'chengscott'
 __copyright__ = 'Copyright 2020, NCTU CGI Lab'
+from collections import deque, namedtuple
+from datetime import datetime
+#from torch.utils.tensorboard import SummaryWriter
+from tensorboardX import SummaryWriter
 import numpy as np
 import argparse
-from collections import deque, namedtuple
 import itertools
 import random
 import time
@@ -12,8 +15,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-#from torch.utils.tensorboard import SummaryWriter
-from tensorboardX import SummaryWriter
 
 
 class ReplayMemory:
@@ -56,7 +57,7 @@ class ReplayMemory:
                 for x in zip(*transitions))
 
 class Net(nn.Module):
-    def __init__(self, state_dim=8, action_dim=4, hidden_dim=32, seed=9487):
+    def __init__(self, state_dim=8, action_dim=4, hidden_dim=32):
         """Model Blueprint
         Params
         ======
@@ -64,17 +65,15 @@ class Net(nn.Module):
             action_size (int): Dimension of each action
             seed (int): Random seed
         """
-        super(Net, self).__init__()   # the line you give simply calls the __init__ method of ClassNames parent class.
-        self.fc1 = nn.Linear(state_dim, 256)
-        self.fc2 = nn.Linear(256,128)
-        self.fc3 = nn.Linear(128,64)
-        self.out = nn.Linear(64, action_dim)
+        super(Net, self).__init__()
+        self.fc1 = nn.Linear(state_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim,hidden_dim)
+        self.out = nn.Linear(hidden_dim, action_dim)
     def forward(self, state):
         x = F.relu(self.fc1(state))
         x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
         q_vals = self.out(x)
-        return q_vals  #no need to return best action here as it selected in the act method based on eps value.
+        return q_vals
 
 class DQN:
     """Define DQN Agent"""
@@ -200,6 +199,7 @@ def train(args, env_name, agent, writer):
                 action = action_space.sample()
             else:
                 action = agent.select_action(state, epsilon, action_space)
+                epsilon = max(epsilon * args.eps_decay, args.eps_min)
             # execute action
             next_state, reward, done, _ = env.step(action)
             # store transition
@@ -222,8 +222,8 @@ def train(args, env_name, agent, writer):
                     .format(total_steps, episode, t, total_reward, ewma_reward,
                             epsilon))
                 break
-        if total_steps >= args.warmup:
-            epsilon = max(epsilon * args.eps_decay, args.eps_min)
+        #if total_steps >= args.warmup:
+        #    epsilon = max(epsilon * args.eps_decay, args.eps_min)
     env.close()
     return ewma_reward
 
@@ -276,7 +276,7 @@ def main():
     # utilities
     parser.add_argument('-d', '--device', default='cuda')
     parser.add_argument('-m', '--model', default='dqn.pth')
-    parser.add_argument('--logdir', default='log/dqn')
+    parser.add_argument('--logdir', default='log/dqn/{}'.format(datetime.now().isoformat()))
     parser.add_argument('--seed', default=2021111, type=int)
     args = parser.parse_args()
 

@@ -160,7 +160,7 @@ class DDPG:
         # Compute the target Q value
         with torch.no_grad():
             target_Q = target_critic_net(next_state, target_actor_net(next_state))
-            target_Q = reward + (done * self.gamma * target_Q)
+            target_Q = reward + self.gamma * (1-done) * target_Q
         # Get current Q estimate
         current_Q = critic_net(state, action)
         # critic_loss

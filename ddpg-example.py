@@ -2,7 +2,7 @@
 __author__ = 'chengscott'
 __copyright__ = 'Copyright 2020, NCTU CGI Lab'
 import argparse
-from collections import deque
+from collections import deque, namedtuple
 import itertools
 import random
 import time
@@ -11,7 +11,11 @@ import gym
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
+from datetime import datetime
+import os
 
 
 class GaussianNoise:
@@ -24,33 +28,51 @@ class GaussianNoise:
 
 
 class ReplayMemory:
-    __slots__ = ['buffer']
+    #__slots__ = ['buffer']
 
     def __init__(self, capacity):
         self.buffer = deque(maxlen=capacity)
+        self.experience = namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done"])
 
     def __len__(self):
         return len(self.buffer)
-
-    def append(self, *transition):
-        # (state, action, reward, next_state, done)
-        self.buffer.append(tuple(map(tuple, transition)))
+    def append(self, state, action, reward, next_state, done):
+        """Add a new experience to memory."""
+        e = self.experience(state, action, reward, next_state, done)
+        self.buffer.append(e)
 
     def sample(self, batch_size, device):
-        '''sample a batch of transition tensors'''
-        ## TODO ##
-        raise NotImplementedError
+        """Randomly sample a batch of experiences from memory."""
+        experiences = random.sample(self.buffer, k=batch_size)
+
+        states = torch.from_numpy(np.vstack([e.state for e in experiences if e is not None])).float().to(device)
+        actions = torch.from_numpy(np.vstack([e.action for e in experiences if e is not None])).long().to(device)
+        rewards = torch.from_numpy(np.vstack([e.reward for e in experiences if e is not None])).float().to(device)
+        next_states = torch.from_numpy(np.vstack([e.next_state for e in experiences if e is not None])).float().to(device)
+        dones = torch.from_numpy(np.vstack([e.done for e in experiences if e is not None]).astype(np.uint8)).float().to(device)
+
+        return (states, actions, rewards, next_states, dones)
 
 
 class ActorNet(nn.Module):
     def __init__(self, state_dim=8, action_dim=2, hidden_dim=(400, 300)):
         super().__init__()
-        ## TODO ##
-        raise NotImplementedError
+        h1, h2 = hidden_dim
+        self.actor_head = nn.Sequential(
+            nn.Linear(state_dim, h1),
+            nn.ReLU(),
+        )
+        self.actor = nn.Sequential(
+            nn.Linear(h1, h2),
+            nn.ReLU(),
+            nn.Linear(h2, action_dim),
+            nn.Tanh()
+        )
 
     def forward(self, x):
-        ## TODO ##
-        raise NotImplementedError
+        x = self.actor_head(x)
+        x = self.actor(x)
+        return x
 
 
 class CriticNet(nn.Module):
@@ -73,22 +95,20 @@ class CriticNet(nn.Module):
 
 
 class DDPG:
-    def __init__(self, args):
+    def __init__(self, state_dim, action_dim, args, writer):
         # behavior network
-        self._actor_net = ActorNet().to(args.device)
-        self._critic_net = CriticNet().to(args.device)
+        self._actor_net = ActorNet(state_dim=state_dim, action_dim=action_dim).to(args.device)
+        self._critic_net = CriticNet(state_dim=state_dim, action_dim=action_dim).to(args.device)
         # target network
-        self._target_actor_net = ActorNet().to(args.device)
-        self._target_critic_net = CriticNet().to(args.device)
+        self._target_actor_net = ActorNet(state_dim=state_dim, action_dim=action_dim).to(args.device)
+        self._target_critic_net = CriticNet(state_dim=state_dim, action_dim=action_dim).to(args.device)
         # initialize target network
         self._target_actor_net.load_state_dict(self._actor_net.state_dict())
         self._target_critic_net.load_state_dict(self._critic_net.state_dict())
-        ## TODO ##
-        # self._actor_opt = ?
-        # self._critic_opt = ?
-        raise NotImplementedError
+        self._actor_opt = optim.Adam(self._actor_net.parameters(), lr=args.lra)
+        self._critic_opt = optim.Adam(self._critic_net.parameters(), lr=args.lrc)
         # action noise
-        self._action_noise = GaussianNoise(dim=2)
+        self._action_noise = GaussianNoise(dim=action_dim)
         # memory
         self._memory = ReplayMemory(capacity=args.capacity)
 
@@ -97,11 +117,17 @@ class DDPG:
         self.batch_size = args.batch_size
         self.tau = args.tau
         self.gamma = args.gamma
+        self.writer = writer
+        self.num_actor_update_iteration = 0
+        self.num_critic_update_iteration = 0
 
     def select_action(self, state, noise=True):
         '''based on the behavior (actor) network and exploration noise'''
-        ## TODO ##
-        raise NotImplementedError
+        state = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
+        action = self._actor_net(state).cpu().data.numpy().flatten()
+        if noise:
+            action = (action + self._action_noise.sample())
+        return action
 
     def append(self, state, action, reward, next_state, done):
         self._memory.append(state, action, [reward / 100], next_state,
@@ -115,6 +141,8 @@ class DDPG:
                                     self.tau)
         self._update_target_network(self._target_critic_net, self._critic_net,
                                     self.tau)
+        self.num_actor_update_iteration += 1
+        self.num_critic_update_iteration += 1
 
     def _update_behavior_network(self, gamma):
         actor_net, critic_net, target_actor_net, target_critic_net = self._actor_net, self._critic_net, self._target_actor_net, self._target_critic_net
@@ -126,15 +154,14 @@ class DDPG:
 
         ## update critic ##
         # critic loss
-        ## TODO ##
-        # q_value = ?
-        # with torch.no_grad():
-        #    a_next = ?
-        #    q_next = ?
-        #    q_target = ?
-        # criterion = ?
-        # critic_loss = criterion(q_value, q_target)
-        raise NotImplementedError
+        # Compute the target Q value
+        target_Q = target_critic_net(next_state, target_actor_net(next_state))
+        target_Q = reward + (done * self.gamma * target_Q).detach()
+        # Get current Q estimate
+        current_Q = critic_net(state, action)
+        # critic_loss
+        critic_loss = F.mse_loss(current_Q, target_Q)
+        self.writer.add_scalar('Loss/critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
         # optimize critic
         actor_net.zero_grad()
         critic_net.zero_grad()
@@ -143,10 +170,8 @@ class DDPG:
 
         ## update actor ##
         # actor loss
-        ## TODO ##
-        # action = ?
-        # actor_loss = ?
-        raise NotImplementedError
+        actor_loss = - critic_net(state, actor_net(state)).mean()
+        self.writer.add_scalar('Loss/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
         # optimize actor
         actor_net.zero_grad()
         critic_net.zero_grad()
@@ -154,11 +179,10 @@ class DDPG:
         actor_opt.step()
 
     @staticmethod
-    def _update_target_network(target_net, net, tau):
+    def _update_target_network(target_net, behavior_net, tau):
         '''update target network by _soft_ copying from behavior network'''
-        for target, behavior in zip(target_net.parameters(), net.parameters()):
-            ## TODO ##
-            raise NotImplementedError
+        for target, behavior in zip(target_net.parameters(), behavior_net.parameters()):
+            target.data.copy_(tau * behavior.data + (1 - tau) * target.data)
 
     def save(self, model_path, checkpoint=False):
         if checkpoint:
@@ -235,42 +259,69 @@ def test(args, env_name, agent, writer):
         total_reward = 0
         env.seed(seed)
         state = env.reset()
-        ## TODO ##
-        # ...
-        #     if done:
-        #         writer.add_scalar('Test/Episode Reward', total_reward, n_episode)
-        #         ...
-        raise NotImplementedError
+        for j in range(env._max_episode_steps):
+            action = agent.select_action(state)
+            if args.render:
+                env.render()
+            state, reward, done, info = env.step(action)
+            total_reward += reward
+            if done:
+                writer.add_scalar('Test/Episode Reward', total_reward, n_episode)
+                break
+        rewards.append(total_reward)
     print('Average Reward', np.mean(rewards))
     env.close()
 
 
 def main():
+    _current_datetime = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     ## arguments ##
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('-d', '--device', default='cuda')
-    parser.add_argument('-m', '--model', default='ddpg.pth')
-    parser.add_argument('--logdir', default='log/ddpg')
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    
     # train
-    parser.add_argument('--warmup', default=10000, type=int)
-    parser.add_argument('--episode', default=1200, type=int)
-    parser.add_argument('--batch_size', default=64, type=int)
-    parser.add_argument('--capacity', default=500000, type=int)
-    parser.add_argument('--lra', default=1e-3, type=float)
-    parser.add_argument('--lrc', default=1e-3, type=float)
-    parser.add_argument('--gamma', default=.99, type=float)
-    parser.add_argument('--tau', default=.005, type=float)
+    parser.add_argument('--warmup', default=10000, type=int,
+                        help='number of warmup steps')
+    parser.add_argument('--episode', default=10000, type=int,
+                        help='upper limit of training episodes')
+    parser.add_argument('--batch_size', default=128, type=int,
+                        help='mini batch size extract from replay buffer')
+    parser.add_argument('--capacity', default=10000, type=int,
+                        help='capacity of replay buffer')
+    parser.add_argument('--lra', default=1e-4, type=float,
+                        help='learning rate actor')
+    parser.add_argument('--lrc', default=1e-3, type=float,
+                        help='learning rate critic')
+    parser.add_argument('--gamma', default=.99, type=float,
+                        help='gamma for update Q value')
+    parser.add_argument('--tau', default=.005, type=float,
+                        help='soft update ratio')
     # test
-    parser.add_argument('--test_only', action='store_true')
-    parser.add_argument('--render', action='store_true')
-    parser.add_argument('--seed', default=20201111, type=int)
+    parser.add_argument('--test_only', action='store_true',
+                        help='conduct test only runs')
+    parser.add_argument('--render', default=False, action='store_true',
+                        help='render display')
+    # utilities
+    parser.add_argument('-d', '--device', default='cuda',
+                        help='device used for training / testing')
+    parser.add_argument('-m', '--model', default='models/ddpg-{}.pth'.format(_current_datetime),
+                        help='path to pretrained model / model save path')
+    parser.add_argument('--logdir', default='log/ddpg/{}'.format(_current_datetime),
+                        help='path to tensorboard log')
+    parser.add_argument('--seed', default=2021111, type=int,
+                        help='random seed')
     args = parser.parse_args()
 
     ## main ##
     env_name = 'LunarLanderContinuous-v2'
-    agent = DDPG(args)
+    env = gym.make(env_name)
+    state_dim = env.observation_space.shape[0]
+    action_dim = env.action_space.shape[0]
     writer = SummaryWriter(args.logdir)
+    agent = DDPG(state_dim, action_dim, args, writer)
     if not args.test_only:
+        os.makedirs('checkpoints', exist_ok=True)
+        os.makedirs('models', exist_ok=True)
         train(args, env_name, agent, writer)
         agent.save(args.model)
     agent.load(args.model)

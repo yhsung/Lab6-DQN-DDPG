@@ -17,7 +17,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-
+import os
 
 class ReplayMemory:
     #__slots__ = ['buffer']
@@ -126,7 +126,7 @@ class DQN:
     def update(self, total_steps):
         if total_steps % self.freq == 0:
             self._update_behavior_network(self.gamma)
-        #if total_steps % self.target_freq == 0:
+        if total_steps % self.target_freq == 0:
             self._update_target_network()
 
     def _update_behavior_network(self, gamma):
@@ -310,6 +310,7 @@ def main():
     agent = DQN(args)
     writer = SummaryWriter(args.logdir)
     if not args.test_only:
+        os.makedirs('checkpoints', exist_ok=True)
         ewma_reward = train(args, env_name, agent, writer)
         #writer.add_hparams(args.__dict__,{'Train/Final Ewma Reward': ewma_reward})
         agent.save(args.model)

@@ -17,6 +17,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import os
 
 
 class ReplayMemory:
@@ -321,6 +322,7 @@ def main():
     agent = DDQN(args)
     writer = SummaryWriter(args.logdir)
     if not args.test_only:
+        os.makedirs('checkpoints', exist_ok=True)
         ewma_reward = train(args, env_name, agent, writer)
         #writer.add_hparams(args.__dict__,{'Train/Final Ewma Reward': ewma_reward})
         agent.save(args.model)

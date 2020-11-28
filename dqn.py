@@ -139,11 +139,15 @@ class DQN:
         """
         # sample a minibatch of transitions
         state, action, reward, next_state, done = self._memory.sample(self.batch_size, self.device)
+        #print('action', action)
         # compute Q_target from the target network inputing next_state
         with torch.no_grad():
-            Q_target_av = self._target_net(next_state).detach().max(1)[0].unsqueeze(1)
+            Q_target_av = self._target_net(next_state).max(1)[0].unsqueeze(1)
+            #print('Q_target_av', Q_target_av)
             Q_target = reward + gamma*(Q_target_av)*(1-done) # broadcasting works here.
+            #print('Q_target', Q_target)
         Q_value = self._behavior_net(state).gather(1, action)
+        #print('Q_value', Q_value)
         loss = F.mse_loss(Q_value, Q_target)
         self._optimizer.zero_grad()
         loss.backward()
@@ -204,7 +208,7 @@ def train(args, env_name, agent, writer):
                 action = action_space.sample()
             else:
                 action = agent.select_action(state, epsilon, action_space)
-                epsilon = max(epsilon * args.eps_decay, args.eps_min)
+                #epsilon = max(epsilon * args.eps_decay, args.eps_min)
             # execute action
             next_state, reward, done, _ = env.step(action)
             # store transition
@@ -227,8 +231,8 @@ def train(args, env_name, agent, writer):
                     .format(total_steps, episode, t, total_reward, ewma_reward,
                             epsilon))
                 break
-        #if total_steps >= args.warmup:
-        #    epsilon = max(epsilon * args.eps_decay, args.eps_min)
+        if total_steps >= args.warmup:
+            epsilon = max(epsilon * args.eps_decay, args.eps_min)
         if episode % 500 == 0:
             agent.save('checkpoints/dqn-{}.pth'.format(episode))
     env.close()

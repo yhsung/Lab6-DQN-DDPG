@@ -140,18 +140,20 @@ class DDQN:
         """
         # sample a minibatch of transitions
         state, action, reward, next_state, done = self._memory.sample(self.batch_size, self.device)
-        # compute Q_target from behavior network inputing next state
+        #print('action', action)
+        # Quote: "We therefore propose to evaluate the greedy policy according to the online
+        # network, but using the target network to estimate its value"
+        # applying target network to evaluate action reward and with greedy approach (max reward)
         with torch.no_grad():
-            # mini-batch
-            action_values = self._behavior_net(next_state).detach()
-            #print('action_values', action_values)
-            argmax_action_values = torch.argmax(action_values)
-            #print('argmax action_values', argmax_action_values)
-            Q_index = argmax_action_values.cpu().data.numpy()
-            #Q_index = torch.argmax(self._behavior_net(next_state)).cpu().data.numpy()
-            Q_target_av = self._target_net(next_state).detach().view(-1)[Q_index]
-
-            #print('Q_target_av', Q_target_av)
+            #print('[DQN] target next eval', self._target_net(next_state).detach())
+            #Q_target_av = self._target_net(next_state).detach().max(1)[0].unsqueeze(1)
+            #print('[DQN] Q_target_av', Q_target_av)
+            #print('[DDQN] target next eval', self._target_net(next_state).detach())
+            Q_target_action = torch.argmax(self._behavior_net(next_state).detach(), dim=1).unsqueeze(1)
+            #print('[DDQN] Q_target_action', Q_target_action)
+            #print('[DDQN] behavior next eval', self._behavior_net(next_state).detach())
+            Q_target_av = self._target_net(next_state).detach().gather(1, Q_target_action)
+            #print('[DDQN] Q_target_av', Q_target_av)
             Q_target = reward + gamma*(Q_target_av)*(1-done) # broadcasting works here.
             #print('Q_target', Q_target)
         Q_value = self._behavior_net(state).gather(1, action)

@@ -81,13 +81,16 @@ class CriticNet(nn.Module):
         h1, h2 = hidden_dim
         self.critic_head = nn.Sequential(
             nn.Linear(state_dim + action_dim, h1),
-            nn.ReLU(),
+            #nn.LayerNorm(h1),
+            nn.ReLU()
         )
         self.critic = nn.Sequential(
             nn.Linear(h1, h2),
+            #nn.LayerNorm(h2),
             nn.ReLU(),
-            nn.Linear(h2, 1),
+            nn.Linear(h2, 1)
         )
+        # https://arxiv.org/pdf/1804.00361.pdf (adding layer norm)
 
     def forward(self, x, action):
         x = self.critic_head(torch.cat([x, action], dim=1))
@@ -106,7 +109,7 @@ class DDPG:
         self._target_actor_net.load_state_dict(self._actor_net.state_dict())
         self._target_critic_net.load_state_dict(self._critic_net.state_dict())
         self._actor_opt = optim.Adam(self._actor_net.parameters(), lr=args.lra)
-        self._critic_opt = optim.Adam(self._critic_net.parameters(), lr=args.lrc)
+        self._critic_opt = optim.Adam(self._critic_net.parameters(), lr=args.lrc, weight_decay=1e-2)#critic_l2_reg)
         # action noise
         self._action_noise = GaussianNoise(dim=action_dim)
         # memory
@@ -155,26 +158,25 @@ class DDPG:
         ## update critic ##
         # critic loss
         # Compute the target Q value
-        target_Q = target_critic_net(next_state, target_actor_net(next_state))
-        target_Q = reward + (done * self.gamma * target_Q).detach()
+        with torch.no_grad():
+            target_Q = target_critic_net(next_state, target_actor_net(next_state))
+            target_Q = reward + (done * self.gamma * target_Q)
         # Get current Q estimate
         current_Q = critic_net(state, action)
         # critic_loss
         critic_loss = F.mse_loss(current_Q, target_Q)
-        self.writer.add_scalar('Loss/critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
+        self.writer.add_scalar('Train/critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
         # optimize critic
-        actor_net.zero_grad()
-        critic_net.zero_grad()
+        critic_opt.zero_grad()
         critic_loss.backward()
         critic_opt.step()
 
         ## update actor ##
         # actor loss
-        actor_loss = - critic_net(state, actor_net(state)).mean()
-        self.writer.add_scalar('Loss/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
+        actor_loss = (- critic_net(state, actor_net(state)) ).mean()
+        self.writer.add_scalar('Train/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
         # optimize actor
-        actor_net.zero_grad()
-        critic_net.zero_grad()
+        actor_opt.zero_grad()
         actor_loss.backward()
         actor_opt.step()
 
@@ -260,7 +262,7 @@ def test(args, env_name, agent, writer):
         env.seed(seed)
         state = env.reset()
         for j in range(env._max_episode_steps):
-            action = agent.select_action(state)
+            action = agent.select_action(state, noise=False)
             if args.render:
                 env.render()
             state, reward, done, info = env.step(action)
@@ -286,7 +288,7 @@ def main():
                         help='upper limit of training episodes')
     parser.add_argument('--batch_size', default=128, type=int,
                         help='mini batch size extract from replay buffer')
-    parser.add_argument('--capacity', default=10000, type=int,
+    parser.add_argument('--capacity', default=1000000, type=int,
                         help='capacity of replay buffer')
     parser.add_argument('--lra', default=1e-4, type=float,
                         help='learning rate actor')
@@ -319,6 +321,8 @@ def main():
     action_dim = env.action_space.shape[0]
     writer = SummaryWriter(args.logdir)
     agent = DDPG(state_dim, action_dim, args, writer)
+    #writer.add_graph(agent._actor_net, torch.FloatTensor(np.zeros(state_dim)).to(args.device), verbose=True)
+    #writer.add_graph(agent._critic_net, (torch.FloatTensor(np.zeros(state_dim)).to(args.device), torch.FloatTensor(np.zeros(action_dim)).to(args.device)), verbose=True)
     if not args.test_only:
         os.makedirs('checkpoints', exist_ok=True)
         os.makedirs('models', exist_ok=True)

@@ -21,7 +21,7 @@ import os
 class GaussianNoise:
     def __init__(self, dim, mu=None, std=None):
         self.mu = mu if mu else np.zeros(dim)
-        self.std = std if std else np.ones(dim) * .1
+        self.std = std if std else np.ones(dim) * .5
 
     def sample(self):
         return np.random.normal(self.mu, self.std)
@@ -130,11 +130,13 @@ class DDPG:
         action = self._actor_net(state).cpu().data.numpy().flatten()
         if noise:
             action = (action + self._action_noise.sample())
+        np.clip(action, -1, 1)
         return action
 
     def append(self, state, action, reward, next_state, done):
-        self._memory.append(state, action, [reward / 100], next_state,
-                            [int(done)])
+        #self._memory.append(state, action, [reward / 100], next_state,
+        #[int(done)])
+        self._memory.append(state, action, reward, next_state, done)
 
     def update(self):
         # update the behavior networks
@@ -274,6 +276,18 @@ def test(args, env_name, agent, writer):
     print('Average Reward', np.mean(rewards))
     env.close()
 
+class NormalizedEnv(gym.ActionWrapper):
+    """ Wrap action """
+
+    def action(self, action):
+        act_k = (self.action_space.high - self.action_space.low)/ 2.
+        act_b = (self.action_space.high + self.action_space.low)/ 2.
+        return act_k * action + act_b
+
+    def reverse_action(self, action):
+        act_k_inv = 2./(self.action_space.high - self.action_space.low)
+        act_b = (self.action_space.high + self.action_space.low)/ 2.
+        return act_k_inv * (action - act_b)
 
 def main():
     _current_datetime = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
@@ -296,7 +310,7 @@ def main():
                         help='learning rate critic')
     parser.add_argument('--gamma', default=.99, type=float,
                         help='gamma for update Q value')
-    parser.add_argument('--tau', default=.005, type=float,
+    parser.add_argument('--tau', default=.01, type=float,
                         help='soft update ratio')
     # test
     parser.add_argument('--test_only', action='store_true',
@@ -312,13 +326,17 @@ def main():
                         help='path to tensorboard log')
     parser.add_argument('--seed', default=2021111, type=int,
                         help='random seed')
+    parser.add_argument('--env', default='LunarLanderContinuous-v2', type=str,
+                        help='random seed')
     args = parser.parse_args()
 
     ## main ##
-    env_name = 'LunarLanderContinuous-v2'
+    env_name = args.env
     env = gym.make(env_name)
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
+    print('Action space', env.action_space)
+    print('Observation space', env.observation_space)
     writer = SummaryWriter(args.logdir)
     agent = DDPG(state_dim, action_dim, args, writer)
     #writer.add_graph(agent._actor_net, torch.FloatTensor(np.zeros(state_dim)).to(args.device), verbose=True)

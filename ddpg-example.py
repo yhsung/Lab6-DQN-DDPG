@@ -80,21 +80,22 @@ class CriticNet(nn.Module):
         super().__init__()
         h1, h2 = hidden_dim
         self.critic_head = nn.Sequential(
-            nn.Linear(state_dim + action_dim, h1),
-            #nn.LayerNorm(h1),
+            nn.Linear(state_dim, h1),
             nn.ReLU()
         )
+        # https://arxiv.org/pdf/1509.02971.pdf
+        # Actions were not included until the 2nd hidden layer of Q.
         self.critic = nn.Sequential(
-            nn.Linear(h1, h2),
-            #nn.LayerNorm(h2),
+            nn.Linear(h1 + action_dim, h2),
             nn.ReLU(),
             nn.Linear(h2, 1)
         )
         # https://arxiv.org/pdf/1804.00361.pdf (adding layer norm)
 
-    def forward(self, x, action):
-        x = self.critic_head(torch.cat([x, action], dim=1))
-        return self.critic(x)
+    def forward(self, state, action):
+        x = self.critic_head(state)
+        x = self.critic(torch.cat([x, action], dim=1))
+        return x
 
 
 class DDPG:
@@ -109,7 +110,8 @@ class DDPG:
         self._target_actor_net.load_state_dict(self._actor_net.state_dict())
         self._target_critic_net.load_state_dict(self._critic_net.state_dict())
         self._actor_opt = optim.Adam(self._actor_net.parameters(), lr=args.lra)
-        self._critic_opt = optim.Adam(self._critic_net.parameters(), lr=args.lrc, weight_decay=1e-2)#critic_l2_reg)
+        self._critic_opt = optim.Adam(self._critic_net.parameters(), lr=args.lrc, weight_decay=1e-2)
+        # weight decay of 10−2 from https://arxiv.org/pdf/1509.02971.pdf
         # action noise
         self._action_noise = GaussianNoise(dim=action_dim)
         # memory
@@ -160,7 +162,8 @@ class DDPG:
         # Compute the target Q value
         with torch.no_grad():
             target_Q = target_critic_net(next_state, target_actor_net(next_state))
-            target_Q = reward + self.gamma * (1-done) * target_Q
+            #target_Q = reward + self.gamma * (1-done) * target_Q
+            target_Q = reward + self.gamma * target_Q
         # Get current Q estimate
         current_Q = critic_net(state, action)
         # critic_loss
@@ -280,7 +283,7 @@ def main():
     ## arguments ##
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    
+
     # train
     parser.add_argument('--warmup', default=10000, type=int,
                         help='number of warmup steps')
@@ -296,14 +299,14 @@ def main():
                         help='learning rate critic')
     parser.add_argument('--gamma', default=.99, type=float,
                         help='gamma for update Q value')
-    parser.add_argument('--tau', default=.005, type=float,
+    parser.add_argument('--tau', default=.001, type=float,
                         help='soft update ratio')
     # test
     parser.add_argument('--test_only', action='store_true',
                         help='conduct test only runs')
     parser.add_argument('--render', default=False, action='store_true',
                         help='render display')
-    # utilities
+    # global config
     parser.add_argument('-d', '--device', default='cuda',
                         help='device used for training / testing')
     parser.add_argument('-m', '--model', default='models/ddpg-{}.pth'.format(_current_datetime),
@@ -312,17 +315,17 @@ def main():
                         help='path to tensorboard log')
     parser.add_argument('--seed', default=2021111, type=int,
                         help='random seed')
+    parser.add_argument('--env', default='LunarLanderContinuous-v2', type=str,
+                        help='environment name')
     args = parser.parse_args()
 
     ## main ##
-    env_name = 'LunarLanderContinuous-v2'
+    env_name = args.env
     env = gym.make(env_name)
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
     writer = SummaryWriter(args.logdir)
     agent = DDPG(state_dim, action_dim, args, writer)
-    #writer.add_graph(agent._actor_net, torch.FloatTensor(np.zeros(state_dim)).to(args.device), verbose=True)
-    #writer.add_graph(agent._critic_net, (torch.FloatTensor(np.zeros(state_dim)).to(args.device), torch.FloatTensor(np.zeros(action_dim)).to(args.device)), verbose=True)
     if not args.test_only:
         os.makedirs('checkpoints', exist_ok=True)
         os.makedirs('models', exist_ok=True)

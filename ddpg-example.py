@@ -132,11 +132,13 @@ class DDPG:
         action = self._actor_net(state).cpu().data.numpy().flatten()
         if noise:
             action = (action + self._action_noise.sample())
+        action = np.clip(action, -1, 1)
         return action
 
     def append(self, state, action, reward, next_state, done):
-        self._memory.append(state, action, [reward / 100], next_state,
-                            [int(done)])
+        #self._memory.append(state, action, [reward / 100], next_state,
+        #[int(done)])
+        self._memory.append(state, action, reward, next_state, int(done))
 
     def update(self):
         # update the behavior networks
@@ -277,6 +279,18 @@ def test(args, env_name, agent, writer):
     print('Average Reward', np.mean(rewards))
     env.close()
 
+class NormalizedEnv(gym.ActionWrapper):
+    """ Wrap action """
+
+    def action(self, action):
+        act_k = (self.action_space.high - self.action_space.low)/ 2.
+        act_b = (self.action_space.high + self.action_space.low)/ 2.
+        return act_k * action + act_b
+
+    def reverse_action(self, action):
+        act_k_inv = 2./(self.action_space.high - self.action_space.low)
+        act_b = (self.action_space.high + self.action_space.low)/ 2.
+        return act_k_inv * (action - act_b)
 
 def main():
     _current_datetime = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
@@ -324,6 +338,8 @@ def main():
     env = gym.make(env_name)
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
+    print('Action space', env.action_space)
+    print('Observation space', env.observation_space)
     writer = SummaryWriter(args.logdir)
     agent = DDPG(state_dim, action_dim, args, writer)
     if not args.test_only:

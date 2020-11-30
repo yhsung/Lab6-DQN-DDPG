@@ -121,11 +121,7 @@ class DDQN:
             return action_space.sample()
 
     def append(self, state, action, reward, next_state, done):
-        # https://www.quora.com/In-DQN-should-reward-be-normalized-and-standardized
-        # Standardizing rewards usually helps as they keep the gradients that are 
-        # being back-propagated and the Q-values of the actions from saturating or blowing up.
-        # https://stackoverflow.com/questions/49801638/normalizing-rewards-to-generate-returns-in-reinforcement-learning
-        self._memory.append(state, [action], [reward / 10], next_state,
+        self._memory.append(state, [action], [reward], next_state,
                             [int(done)])
 
     def update(self, total_steps):
@@ -148,18 +144,17 @@ class DDQN:
         # Quote: "We therefore propose to evaluate the greedy policy according to the online
         # network, but using the target network to estimate its value"
         # applying target network to evaluate action reward and with greedy approach (max reward)
-        with torch.no_grad():
-            #print('[DQN] target next eval', self._target_net(next_state).detach())
-            #Q_target_av = self._target_net(next_state).detach().max(1)[0].unsqueeze(1)
-            #print('[DQN] Q_target_av', Q_target_av)
-            #print('[DDQN] target next eval', self._target_net(next_state).detach())
-            Q_target_action = torch.argmax(self._behavior_net(next_state).detach(), dim=1).unsqueeze(1)
-            #print('[DDQN] Q_target_action', Q_target_action)
-            #print('[DDQN] behavior next eval', self._behavior_net(next_state).detach())
-            Q_target_av = self._target_net(next_state).detach().gather(1, Q_target_action)
-            #print('[DDQN] Q_target_av', Q_target_av)
-            Q_target = reward + gamma*(Q_target_av)*(1-done) # broadcasting works here.
-            #print('Q_target', Q_target)
+        Q_target_action = torch.argmax(self._behavior_net(next_state), dim=1).unsqueeze(1)
+        #print('[DQN] target next eval', self._target_net(next_state).detach())
+        #Q_target_av = self._target_net(next_state).detach().max(1)[0].unsqueeze(1)
+        #print('[DQN] Q_target_av', Q_target_av)
+        #print('[DDQN] target next eval', self._target_net(next_state).detach())
+        #print('[DDQN] Q_target_action', Q_target_action)
+        #print('[DDQN] behavior next eval', self._behavior_net(next_state).detach())
+        Q_target_av = self._target_net(next_state).gather(1, Q_target_action).detach()
+        #print('[DDQN] Q_target_av', Q_target_av)
+        Q_target = reward + gamma*(Q_target_av)*(1-done) # broadcasting works here.
+        #print('Q_target', Q_target)
         Q_value = self._behavior_net(state).gather(1, action)
         #print('Q_value', Q_value)
         loss = F.mse_loss(Q_value, Q_target)
@@ -168,23 +163,10 @@ class DDQN:
         nn.utils.clip_grad_norm_(self._behavior_net.parameters(), 5)
         self._optimizer.step()
 
-    def soft_update(self, local_model, target_model, tau):
-        """Soft update model parameters.
-        θ_target = τ*θ_local + (1 - τ)*θ_target
-
-        Params
-        ======
-            local_model (PyTorch model): weights will be copied from
-            target_model (PyTorch model): weights will be copied to
-            tau (float): interpolation parameter
-        """
-        for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
-            target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
-
-
     def _update_target_network(self):
         '''update target network by copying from behavior network'''
-        self.soft_update(self._behavior_net, self._target_net, 1e-3)
+        for target, behavior in zip(self._target_net.parameters(), self._behavior_net.parameters()):
+            target.data.copy_(behavior.data)
 
     def save(self, model_path, checkpoint=False):
         if checkpoint:
@@ -222,7 +204,7 @@ def train(args, env_name, agent, writer):
                 action = action_space.sample()
             else:
                 action = agent.select_action(state, epsilon, action_space)
-                #epsilon = max(epsilon * args.eps_decay, args.eps_min)
+                epsilon = max(epsilon * args.eps_decay, args.eps_min)
             # execute action
             next_state, reward, done, _ = env.step(action)
             # store transition
@@ -235,16 +217,18 @@ def train(args, env_name, agent, writer):
             total_steps += 1
             if done:
                 ewma_reward = 0.05 * total_reward + (1 - 0.05) * ewma_reward
-                writer.add_scalar('Train/Epsilon', epsilon, episode)
-                writer.add_scalar('Train/Episode Reward', total_reward, episode)
-                writer.add_scalar('Train/Ewma Reward', ewma_reward, episode)
+                writer.add_scalar('Train/Epsilon', epsilon, total_steps)
+                writer.add_scalar('Train/Episode Reward', total_reward,
+                                  total_steps)
+                writer.add_scalar('Train/Ewma Reward', ewma_reward,
+                                  total_steps)
                 print(
                     'Step: {}\tEpisode: {}\tLength: {:3d}\tTotal reward: {:.2f}\tEwma reward: {:.2f}\tEpsilon: {:.3f}'
                     .format(total_steps, episode, t, total_reward, ewma_reward,
                             epsilon))
                 break
-        if total_steps >= args.warmup:
-            epsilon = max(epsilon * args.eps_decay, args.eps_min)
+        #if total_steps >= args.warmup:
+        #    epsilon = max(epsilon * args.eps_decay, args.eps_min)
         if episode % 500 == 0:
             agent.save('checkpoints/ddqn-{}.pth'.format(episode))
     env.close()
@@ -327,6 +311,7 @@ def main():
     writer = SummaryWriter(args.logdir)
     if not args.test_only:
         os.makedirs('checkpoints', exist_ok=True)
+        os.makedirs('models', exist_ok=True)
         ewma_reward = train(args, env_name, agent, writer)
         #writer.add_hparams(args.__dict__,{'Train/Final Ewma Reward': ewma_reward})
         agent.save(args.model)

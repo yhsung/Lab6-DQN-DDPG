@@ -124,6 +124,7 @@ class DDQN:
         # https://www.quora.com/In-DQN-should-reward-be-normalized-and-standardized
         # Standardizing rewards usually helps as they keep the gradients that are 
         # being back-propagated and the Q-values of the actions from saturating or blowing up.
+        # https://stackoverflow.com/questions/49801638/normalizing-rewards-to-generate-returns-in-reinforcement-learning
         self._memory.append(state, [action], [reward / 10], next_state,
                             [int(done)])
 

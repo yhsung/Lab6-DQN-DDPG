@@ -136,7 +136,11 @@ class DDPG:
         return action
 
     def append(self, state, action, reward, next_state, done):
-        #self._memory.append(state, action, [reward / 100], next_state,
+        # https://www.quora.com/In-DQN-should-reward-be-normalized-and-standardized
+        # Standardizing rewards usually helps as they keep the gradients that are 
+        # being back-propagated and the Q-values of the actions from saturating or blowing up.
+        # https://stackoverflow.com/questions/49801638/normalizing-rewards-to-generate-returns-in-reinforcement-learning
+        #self._memory.append(state, action, [reward / 100], nedxt_state,
         #[int(done)])
         self._memory.append(state, action, reward, next_state, int(done))
 
@@ -245,10 +249,8 @@ def train(args, env_name, agent, writer):
             total_steps += 1
             if done:
                 ewma_reward = 0.05 * total_reward + (1 - 0.05) * ewma_reward
-                writer.add_scalar('Train/Episode Reward', total_reward,
-                                  total_steps)
-                writer.add_scalar('Train/Ewma Reward', ewma_reward,
-                                  total_steps)
+                writer.add_scalar('Train/Episode Reward', total_reward, episode)
+                writer.add_scalar('Train/Ewma Reward', ewma_reward, episode)
                 print(
                     'Step: {}\tEpisode: {}\tLength: {:3d}\tTotal reward: {:.2f}\tEwma reward: {:.2f}'
                     .format(total_steps, episode, t, total_reward,

@@ -3,17 +3,17 @@
 - Deadline: 12/09 (Wed) 12:00 p.m.
 - (No demo)
 
-![OpenAI Gym LundarLander-v2](images/1_Qh3ECP-E9HhDniFJdByVAA.gif)
+![OpenAI Gym LundarLander-v2](images/LunarLander-v2-0.gif)
 
 ## Command usage
-usage: dqn.py [-h] [--warmup WARMUP] [--episode EPISODE] [--capacity CAPACITY]
-              [--batch_size BATCH_SIZE] [--lr LR] [--eps_decay EPS_DECAY]
-              [--eps_min EPS_MIN] [--gamma GAMMA] [--freq FREQ]
-              [--target_freq TARGET_FREQ] [--test_only] [--render]
-              [--test_epsilon TEST_EPSILON] [-d DEVICE] [-m MODEL]
-              [--logdir LOGDIR] [--seed SEED]
+```usage: ddqn.py [-h] [--warmup WARMUP] [--episode EPISODE]
+               [--capacity CAPACITY] [--batch_size BATCH_SIZE] [--lr LR]
+               [--eps_decay EPS_DECAY] [--eps_min EPS_MIN] [--gamma GAMMA]
+               [--freq FREQ] [--target_freq TARGET_FREQ] [--test_only]
+               [--render] [--test_epsilon TEST_EPSILON] [-d DEVICE] [-m MODEL]
+               [--logdir LOGDIR] [--seed SEED]
 
-DLP DQN Lab
+DLP DDQN Lab
 
 optional arguments:
   -h, --help            show this help message and exit
@@ -39,8 +39,8 @@ optional arguments:
                         device used for training / testing (default: cuda)
   -m MODEL, --model MODEL
                         path to pretrained model / model save path (default:
-                        models/dqn-2020-11-27-01-10-04.pth)
+                        models/ddqn-2020-11-30-23-51-10.pth)
   --logdir LOGDIR       path to tensorboard log (default:
-                        log/dqn/2020-11-27-01-10-04)
+                        log/ddqn/2020-11-30-23-51-10)
   --seed SEED           random seed (default: 2021111)
-
+```

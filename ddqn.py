@@ -19,6 +19,19 @@ import torch.nn.functional as F
 import torch.optim as optim
 import os
 
+from matplotlib import animation
+import matplotlib.pyplot as plt
+
+def export_frames_as_gif(frames, filename):
+    patch = plt.imshow(frames[0])
+    plt.axis('off')
+    def animate(i):
+        patch.set_data(frames[i])
+        
+    anim = animation.FuncAnimation(plt.gcf(), animate, frames = len(frames), interval=3)
+    print('Saving gif...')
+    #anim.save('images/{}.gif'.format(filename), fps=30)
+    anim.save('images/{}.gif'.format(filename), writer=animation.PillowWriter(fps=30))
 
 class ReplayMemory:
     #__slots__ = ['buffer']
@@ -243,19 +256,21 @@ def test(args, env_name, agent, writer):
     seeds = (args.seed + i for i in range(10))
     rewards = []
     for n_episode, seed in enumerate(seeds):
+        frames = []
         total_reward = 0
         env.seed(seed)
         state = env.reset()
         for j in range(env._max_episode_steps):
             action = agent.select_action(state, epsilon, action_space)
             if args.render:
-                env.render()
+                frames.append(env.render(mode = 'rgb_array'))
             state, reward, done, info = env.step(action)
             total_reward += reward
             if done:
                 writer.add_scalar('Test/Episode Reward', total_reward, n_episode)
                 break
         rewards.append(total_reward)
+        export_frames_as_gif(frames, '{}-{}'.format(env_name, n_episode))
     print('Average Reward', np.mean(rewards))
     #writer.add_hparams(args.__dict__,{'Test/Average Reward': np.mean(rewards)})
     env.close()

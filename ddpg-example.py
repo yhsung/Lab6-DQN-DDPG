@@ -356,7 +356,7 @@ def main():
         if args.load_checkpoint:
             print('load check point', args.load_checkpoint)
             agent.load(args.load_checkpoint, checkpoint=True)
-        train(args, env_name, agent, writer)
+        ewma_reward = train(args, env_name, agent, writer)
         writer.add_hparams(args.__dict__,{'hparam/final_ewma_reward': ewma_reward})
         agent.save(args.model)
     agent.load(args.model)

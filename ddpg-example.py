@@ -13,7 +13,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.tensorboard import SummaryWriter
+#from torch.utils.tensorboard import SummaryWriter
+from tensorboardX import SummaryWriter
 from datetime import datetime
 import os
 
@@ -137,7 +138,7 @@ class DDPG:
 
     def append(self, state, action, reward, next_state, done):
         # https://www.quora.com/In-DQN-should-reward-be-normalized-and-standardized
-        # Standardizing rewards usually helps as they keep the gradients that are 
+        # Standardizing rewards usually helps as they keep the gradients that are
         # being back-propagated and the Q-values of the actions from saturating or blowing up.
         # https://stackoverflow.com/questions/49801638/normalizing-rewards-to-generate-returns-in-reinforcement-learning
         #self._memory.append(state, action, [reward / 100], nedxt_state,
@@ -214,7 +215,7 @@ class DDPG:
                 }, model_path)
 
     def load(self, model_path, checkpoint=False):
-        model = torch.load(model_path)
+        model = torch.load(model_path, torch.device(self.device))
         self._actor_net.load_state_dict(model['actor'])
         self._critic_net.load_state_dict(model['critic'])
         if checkpoint:
@@ -257,8 +258,9 @@ def train(args, env_name, agent, writer):
                             ewma_reward))
                 break
         if episode % 100 == 0:
-            agent.save('checkpoints/ddpg-{}.pth'.format(episode))
+            agent.save('checkpoints/ddpg-{}.pth'.format(episode), checkpoint=True)
     env.close()
+    return ewma_reward
 
 
 def test(args, env_name, agent, writer):
@@ -319,6 +321,8 @@ def main():
                         help='gamma for update Q value')
     parser.add_argument('--tau', default=.001, type=float,
                         help='soft update ratio')
+    parser.add_argument('--load_checkpoint', default="", type=str,
+                        help='specify checkpoint path')
     # test
     parser.add_argument('--test_only', action='store_true',
                         help='conduct test only runs')
@@ -349,7 +353,11 @@ def main():
     if not args.test_only:
         os.makedirs('checkpoints', exist_ok=True)
         os.makedirs('models', exist_ok=True)
+        if args.load_checkpoint:
+            print('load check point', args.load_checkpoint)
+            agent.load(args.load_checkpoint, checkpoint=True)
         train(args, env_name, agent, writer)
+        writer.add_hparams(args.__dict__,{'hparam/final_ewma_reward': ewma_reward})
         agent.save(args.model)
     agent.load(args.model)
     test(args, env_name, agent, writer)

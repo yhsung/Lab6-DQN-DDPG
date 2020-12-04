@@ -5,8 +5,8 @@ __author__ = 'chengscott'
 __copyright__ = 'Copyright 2020, NCTU CGI Lab'
 from collections import deque, namedtuple
 from datetime import datetime
-from torch.utils.tensorboard import SummaryWriter
-#from tensorboardX import SummaryWriter
+#from torch.utils.tensorboard import SummaryWriter
+from tensorboardX import SummaryWriter
 import numpy as np
 import argparse
 import itertools
@@ -202,7 +202,7 @@ def train(args, env_name, agent, writer):
     env = gym.make(env_name)
     action_space = env.action_space
     total_steps, epsilon, ewma_reward = 0, 1., 0.
-    writer.add_graph(agent._behavior_net, torch.FloatTensor([0., 0., 0., 0., 0., 0., 0., 0.]).to(args.device), True)
+    #writer.add_graph(agent._behavior_net, torch.FloatTensor([0., 0., 0., 0., 0., 0., 0., 0.]).to(args.device), True)
     for episode in range(args.episode):
         total_reward = 0
         state = env.reset()
@@ -317,8 +317,9 @@ def main():
     writer = SummaryWriter(args.logdir)
     if not args.test_only:
         os.makedirs('checkpoints', exist_ok=True)
+        os.makedirs('models', exist_ok=True)
         ewma_reward = train(args, env_name, agent, writer)
-        #writer.add_hparams(args.__dict__,{'Train/Final Ewma Reward': ewma_reward})
+        writer.add_hparams(args.__dict__,{'hparams/Ewma Reward': ewma_reward})
         agent.save(args.model)
     agent.load(args.model)
     test(args, env_name, agent, writer)
